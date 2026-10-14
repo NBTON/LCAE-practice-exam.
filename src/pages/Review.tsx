@@ -170,7 +170,7 @@ export function Report() {
     <div>
       <h1>Question bank & import report</h1>
       <div className="card">
-        <p><strong>{BANK.count} usable questions</strong> (bank v{BANK.version}): Building {counts.by.build} · Testing {counts.by.test} · Deploying {counts.by.deploy} · Monitoring {counts.by.monitor} · single {counts.single} · multi {counts.multi} · 35 exact duplicates removed.</p>
+        <p><strong>{BANK.count} usable questions</strong> (bank v{BANK.version}): Building {counts.by.build} · Testing {counts.by.test} · Deploying {counts.by.deploy} · Monitoring {counts.by.monitor} · single {counts.single} · multi {counts.multi} · 35 exact duplicates removed (v1.0.0) · 120 added, 0 skipped (v1.1.0).</p>
         <p className="small"><a href={`${import.meta.env.BASE_URL}import-report.md`} target="_blank" rel="noreferrer">Open the full import report (Markdown)</a></p>
       </div>
       <div className="card" style={{ marginTop: 12 }}>

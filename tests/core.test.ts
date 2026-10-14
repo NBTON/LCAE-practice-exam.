@@ -10,6 +10,7 @@ import {
   loadProgress,
   remainingMs,
   remapLetters,
+  resolveFixedMock,
   scoreQuestions,
   shuffledOrder,
   validateImport,
@@ -33,13 +34,17 @@ function multi(): BankQuestion {
 }
 
 describe('question bank import', () => {
-  it('has 115 usable questions with per-domain minimums for full mocks', () => {
-    expect(BANK.count).toBe(115);
-    expect(BANK.questions).toHaveLength(115);
+  it('has 235 usable questions with per-domain minimums for full mocks', () => {
+    expect(BANK.count).toBe(235);
+    expect(BANK.questions).toHaveLength(235);
     const per: Record<string, number> = {};
     for (const q of BANK.questions) per[q.domain] = (per[q.domain] ?? 0) + 1;
-    expect(per).toMatchObject({ build: 30, test: 28, deploy: 29, monitor: 28 });
+    expect(per).toMatchObject({ build: 60, test: 58, deploy: 59, monitor: 58 });
     for (const d of ['build', 'test', 'deploy', 'monitor']) expect(per[d]).toBeGreaterThanOrEqual(10);
+    const singles = BANK.questions.filter((q) => q.selectType === 'single').length;
+    const multis = BANK.questions.filter((q) => q.selectType === 'multiple').length;
+    expect(singles).toBe(186);
+    expect(multis).toBe(49);
   });
 
   it('supports both answer-key formats (details letters + table + plus-format)', () => {
@@ -58,8 +63,23 @@ describe('question bank import', () => {
       expect(q.explanation.length).toBeGreaterThan(10);
       expect(q.takeaway.length).toBeGreaterThan(10);
       expect(q.sources.length).toBeGreaterThanOrEqual(1);
+      expect(q.docsLinks.length).toBeGreaterThanOrEqual(1);
       for (const oid of q.correctOptionIds) {
-        expect(q.optionExplanations[oid]?.length).toBeGreaterThan(5);
+        expect(q.options.some((o) => o.id === oid)).toBe(true);
+      }
+      if (q.id.startsWith('LCAE-X-')) {
+        // Additional pack: overall explanation only; per-option breakdowns not supplied.
+        expect(q.optionExplanations ?? {}).toBeDefined();
+      } else {
+        for (const oid of q.correctOptionIds) {
+          expect(q.optionExplanations[oid]?.length).toBeGreaterThan(5);
+        }
+      }
+      if (q.selectType === 'single') {
+        expect(q.selectCount).toBeNull();
+        expect(q.correctOptionIds).toHaveLength(1);
+      } else {
+        expect(q.selectCount).toBe(q.correctOptionIds.length);
       }
     }
   });
@@ -72,6 +92,65 @@ describe('question bank import', () => {
     );
     // No separate abbreviated Practice-A records exist.
     expect(BANK.questions.some((q) => q.id.startsWith('praca-'))).toBe(false);
+  });
+
+  it('imports the 120 additional questions with stable IDs and no duplicates', () => {
+    const added = BANK.questions.filter((q) => q.id.startsWith('LCAE-X-'));
+    expect(added).toHaveLength(120);
+    // 30 per domain, 96 single + 24 multi
+    const per: Record<string, number> = {};
+    let singles = 0, multis = 0;
+    for (const q of added) {
+      per[q.domain] = (per[q.domain] ?? 0) + 1;
+      if (q.selectType === 'single') singles += 1; else multis += 1;
+    }
+    expect(per).toMatchObject({ build: 30, test: 30, deploy: 30, monitor: 30 });
+    expect(singles).toBe(96);
+    expect(multis).toBe(24);
+    // IDs and option IDs globally unique; correct IDs resolve to options
+    expect(new Set(BANK.questions.map((q) => q.id)).size).toBe(235);
+    const optIds = BANK.questions.flatMap((q) => q.options.map((o) => o.id));
+    expect(new Set(optIds).size).toBe(optIds.length);
+    for (const q of added) {
+      expect(q.stem.length).toBeGreaterThan(10);
+      expect(q.explanation.length).toBeGreaterThan(10);
+      expect(q.docsLinks.length).toBeGreaterThanOrEqual(1);
+      expect(q.sources[0].file).toBe('LCAE_Additional_Questions.md');
+      expect(q.sources[0].ref).toBe(q.id);
+      expect(typeof q.mockId).toBe('string');
+    }
+  });
+
+  it('registers the three fixed 40Q mock sets with explicit balanced membership', () => {
+    expect(BANK.mocks).toHaveLength(3);
+    const all = new Set<string>();
+    for (const m of BANK.mocks!) {
+      expect(m.questionIds).toHaveLength(40);
+      expect(new Set(m.questionIds).size).toBe(40);
+      expect(m.questionCount).toBe(40);
+      expect(m.questionsPerDomain).toBe(10);
+      expect(m.singleSelectCount).toBe(32);
+      expect(m.multiSelectCount).toBe(8);
+      expect(m.timerMinutes).toBe(120);
+      expect(m.passThreshold).toBe(28);
+      const qs = m.questionIds.map((id) => byId.get(id)!);
+      expect(qs.every(Boolean)).toBe(true);
+      const per: Record<string, number> = {};
+      let s = 0, mu = 0;
+      for (const q of qs) {
+        per[q.domain] = (per[q.domain] ?? 0) + 1;
+        if (q.selectType === 'single') s += 1; else mu += 1;
+      }
+      expect(per).toMatchObject({ build: 10, test: 10, deploy: 10, monitor: 10 });
+      expect(s).toBe(32);
+      expect(mu).toBe(8);
+      for (const id of m.questionIds) all.add(id);
+    }
+    // The three sets partition the 120 additional questions.
+    expect(all.size).toBe(120);
+    for (const q of BANK.questions.filter((x) => x.id.startsWith('LCAE-X-'))) {
+      expect(all.has(q.id)).toBe(true);
+    }
   });
 });
 
@@ -102,6 +181,31 @@ describe('grading', () => {
     // unanswered scores zero in totals
     const s = scoreQuestions([q], {});
     expect(s.score).toBe(0);
+  });
+
+  it('grades the additional pack by stable option IDs (single + multi edge cases)', () => {
+    const s1 = byId.get('LCAE-X-B01')!;
+    expect(s1.selectType).toBe('single');
+    const [c1] = s1.correctOptionIds;
+    expect(gradeSelections(s1, [c1]).correct).toBe(true);
+    const w1 = s1.options.map((o) => o.id).find((id) => id !== c1)!;
+    expect(gradeSelections(s1, [w1]).correct).toBe(false);
+
+    const m1 = byId.get('LCAE-X-B02')!;
+    expect(m1.selectType).toBe('multiple');
+    const cor = [...m1.correctOptionIds];
+    expect(gradeSelections(m1, cor).correct).toBe(true);
+    // reversed selection order still correct (order-insensitive)
+    expect(gradeSelections(m1, [...cor].reverse()).correct).toBe(true);
+    // missing one correct fails
+    expect(gradeSelections(m1, cor.slice(0, 1)).correct).toBe(false);
+    // one extra wrong fails
+    const wrong = m1.options.map((o) => o.id).find((id) => !cor.includes(id))!;
+    expect(gradeSelections(m1, [...cor, wrong]).correct).toBe(false);
+    // shuffled display order does not change grading (IDs are stable)
+    const ord = shuffledOrder(m1, 'mock-seed', true).order;
+    expect(ord.slice().sort()).toEqual(m1.options.map((o) => o.id).sort());
+    expect(gradeSelections(m1, cor).correct).toBe(true);
   });
 });
 
@@ -168,6 +272,28 @@ describe('mock generation', () => {
     const res = generateMock(tiny, () => 0.1);
     if (!('shortage' in res)) throw new Error('expected shortage');
     expect(res.shortage[0]).toMatchObject({ domain: 'build', available: 5, needed: 10 });
+  });
+
+  it('resolves fixed mock sets from explicit IDs in section order', () => {
+    for (const m of BANK.mocks!) {
+      const res = resolveFixedMock(BANK.questions, m);
+      if (!('order' in res)) throw new Error('expected order: ' + JSON.stringify(res));
+      expect(res.order).toHaveLength(40);
+      expect(new Set(res.order.map((q) => q.id)).size).toBe(40);
+      expect(res.order.slice(0, 10).every((q) => q.domain === 'build')).toBe(true);
+      expect(res.order.slice(10, 20).every((q) => q.domain === 'test')).toBe(true);
+      expect(res.order.slice(20, 30).every((q) => q.domain === 'deploy')).toBe(true);
+      expect(res.order.slice(30, 40).every((q) => q.domain === 'monitor')).toBe(true);
+      // every resolved ID comes from the definition (no inference from order)
+      expect(res.order.map((q) => q.id).sort()).toEqual([...m.questionIds].sort());
+    }
+    // unknown IDs and duplicates are rejected, not silently patched
+    const bad = resolveFixedMock(BANK.questions, {
+      id: 'BAD', questionIds: ['nope'], questionCount: 40,
+      questionsPerDomain: 10, singleSelectCount: 32, multiSelectCount: 8,
+      timerMinutes: 120, passThreshold: 28,
+    });
+    expect('error' in bad).toBe(true);
   });
 });
 

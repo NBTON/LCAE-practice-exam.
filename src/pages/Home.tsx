@@ -19,7 +19,7 @@ export default function Home() {
         <span className="eyebrow">Independent practice tool · not an official simulator</span>
         <h1>LCAE Practice Exam</h1>
         <p className="muted">
-          115-question bank · Practice with explanations · 40-question, {MOCK_MINUTES}-minute mocks
+          {BANK.count}-question bank · Practice with explanations · 40-question, {MOCK_MINUTES}-minute mocks
           (pass {PASS_SCORE}/40) across Building, Testing, Deploying, and Monitoring.
           Progress is stored on this device/browser only.
         </p>

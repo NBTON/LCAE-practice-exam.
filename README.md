@@ -1,8 +1,9 @@
 # LCAE Practice Exam — Independent Practice Tool
 
 Static study site for the LangChain Certified Agent Engineer (LCAE) exam:
-115-question bank, explanation-first practice mode, and 40-question / 120-minute
-mock exams (learning + exam-simulation). No backend, no login, no AI API —
+235-question bank, explanation-first practice mode, and 40-question / 120-minute
+mock exams (learning + exam-simulation, random balanced sets plus three fixed
+40Q sets). No backend, no login, no AI API —
 explanations ship with the site.
 
 Live site: `https://NBTON.github.io/LCAE-practice-exam./`
@@ -42,6 +43,10 @@ npm run preview  # serve the production build locally
   1. `npm test` (validates counts, both key formats, dedup refs, grading,
      shuffle/remap, mock balance, timer, storage/import validation),
   2. `npm run build`.
+- v1.1.0 adds 120 original practice questions from `LCAE_Additional_Questions.md`
+  / `.json` (30 per domain; 96 single + 24 multi; three fixed 40Q mock sets).
+  See `public/import-report.md` for the v1.1.0 import notes, duplicate handling
+  (120 candidates, 0 skipped), and research-note review flags.
 
 ## Validation
 

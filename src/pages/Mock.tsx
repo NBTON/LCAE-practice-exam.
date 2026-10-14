@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import QuestionView from '../components/QuestionView';
-import type { Domain, MockSessionState, PracticeSessionState } from '../lib/core';
+import type { Domain, FixedMock, MockSessionState, PracticeSessionState } from '../lib/core';
 import {
   DOMAINS, DOMAIN_LABELS, MOCK_MINUTES, MOCK_PER_DOMAIN, PASS_SCORE,
   createDeadline, formatRemaining,
-  generateMock, gradeSelections, remainingMs, scoreQuestions, shuffledOrder,
+  generateMock, gradeSelections, remainingMs, resolveFixedMock, scoreQuestions, shuffledOrder,
 } from '../lib/core';
 import { BANK, questionById, useStore } from '../lib/store';
 import { Link, navigate } from '../nav';
@@ -44,27 +44,54 @@ function loadDetail(id: string): MockDetail | null {
 export function MockSetup() {
   const { progress, setMock } = useStore();
   const [mode, setMode] = useState<'learning' | 'exam'>('learning');
+  const [setChoice, setSetChoice] = useState<string>('random');
   const [shortage, setShortage] = useState<{ domain: Domain; available: number; needed: number }[] | null>(null);
+  const [fixedError, setFixedError] = useState<string | null>(null);
 
   const active = progress.activeMock && !progress.activeMock.submitted ? progress.activeMock : null;
+  const fixedMocks: FixedMock[] = BANK.mocks ?? [];
+
+  function startQuestions(): ReturnType<typeof generateMock> | { fixed: FixedMock } {
+    if (setChoice !== 'random') {
+      const def = fixedMocks.find((m) => m.id === setChoice);
+      if (!def) {
+        setFixedError(`Unknown mock set ${setChoice}.`);
+        return { shortage: [] };
+      }
+      return { fixed: def };
+    }
+    return generateMock(BANK.questions);
+  }
 
   function start() {
-    const res = generateMock(BANK.questions);
-    if ('shortage' in res) {
-      setShortage(res.shortage);
-      return;
+    const picked = startQuestions();
+    let order;
+    if ('fixed' in picked) {
+      const res = resolveFixedMock(BANK.questions, picked.fixed);
+      if ('error' in res) {
+        setFixedError(res.error);
+        return;
+      }
+      order = res.order;
+    } else {
+      if ('shortage' in picked) {
+        setShortage(picked.shortage);
+        return;
+      }
+      order = picked.order;
     }
     const id = 'm-' + Date.now().toString(36);
     const orderMap: Record<string, string[]> = {};
-    for (const q of res.order) {
+    for (const q of order) {
       orderMap[q.id] = shuffledOrder(q, id, progress.settings.shuffle).order;
     }
     const s: MockSessionState = {
       id, mode, createdAt: Date.now(), deadline: createDeadline(Date.now(), MOCK_MINUTES),
-      questionIds: res.order.map((q) => q.id), orderMap, index: 0,
+      questionIds: order.map((q) => q.id), orderMap, index: 0,
       selections: {}, flagged: {}, checked: {}, submitted: false,
     };
     setShortage(null);
+    setFixedError(null);
     setMock(s);
     navigate('#/mock/run');
   }
@@ -84,9 +111,24 @@ export function MockSetup() {
       <div className="card grid" style={{ marginTop: 12 }}>
         <label className="field"><span><input type="radio" name="mmode" checked={mode === 'learning'} onChange={() => setMode('learning')} /> <strong>Learning mock</strong> — same 40Q/{MOCK_MINUTES}-min structure, explanations after checking each answer.</span></label>
         <label className="field"><span><input type="radio" name="mmode" checked={mode === 'exam'} onChange={() => setMode('exam')} /> <strong>Exam simulation</strong> — answers editable until final submission; correctness and explanations hidden until the end.</span></label>
+        <label className="field">Mock set
+          <select value={setChoice} onChange={(e) => { setSetChoice(e.target.value); setFixedError(null); }}>
+            <option value="random">Random balanced set (40Q · 10 per domain)</option>
+            {fixedMocks.map((m) => (
+              <option key={m.id} value={m.id}>Fixed set {m.id} (40Q · 10 per domain · 32 single + 8 multi)</option>
+            ))}
+          </select>
+        </label>
+        <p className="muted small">Fixed sets use the pack&apos;s explicit question lists (same {MOCK_MINUTES}-minute timer and {PASS_SCORE}/40 practice threshold; multi-select needs the exact option set, no partial credit).</p>
         <div className="toolbar">
           <button className="btn btn-primary" onClick={start}>Start {mode === 'learning' ? 'learning mock' : 'exam simulation'}</button>
         </div>
+        {fixedError && (
+          <div className="feedback bad">
+            <p><strong>Cannot start this fixed mock set.</strong></p>
+            <p>{fixedError}</p>
+          </div>
+        )}
         {shortage && (
           <div className="feedback bad">
             <p><strong>Cannot build a full 40-question mock.</strong></p>

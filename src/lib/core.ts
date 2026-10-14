@@ -31,6 +31,24 @@ export interface BankQuestion {
   docsLinks: string[];
   sources: SourceRef[];
   flags: Record<string, boolean>;
+  /** v1.1.0 additional-bank membership (explicit mock assignment, not inferred). */
+  mockId?: string;
+  objective?: string;
+  difficulty?: string;
+  style?: string;
+  verifiedOn?: string;
+  provenance?: string;
+}
+
+export interface FixedMock {
+  id: string;
+  questionIds: string[];
+  questionCount: number;
+  questionsPerDomain: number;
+  singleSelectCount: number;
+  multiSelectCount: number;
+  timerMinutes: number;
+  passThreshold: number;
 }
 
 export interface Bank {
@@ -38,6 +56,8 @@ export interface Bank {
   generated: string;
   count: number;
   questions: BankQuestion[];
+  /** Fixed, author-defined mock sets (explicit questionIds). Absent in v1.0.0. */
+  mocks?: FixedMock[];
 }
 
 export const DOMAINS: Domain[] = ['build', 'test', 'deploy', 'monitor'];
@@ -202,6 +222,46 @@ export function generateMock(
   if (shortage.length > 0) return { shortage };
   const order = [...sections.build, ...sections.test, ...sections.deploy, ...sections.monitor];
   return { sections, order };
+}
+
+/**
+ * Resolve a fixed, author-defined mock set by explicit questionIds.
+ * Membership is never inferred from file order: only the IDs listed in the
+ * mock definition are used, in the bank's canonical section order
+ * (build → test → deploy → monitor) to match the random-mock layout.
+ * Returns the ordered questions or a human-readable error.
+ */
+export function resolveFixedMock(
+  bank: BankQuestion[],
+  mock: FixedMock,
+): { order: BankQuestion[] } | { error: string } {
+  const byId = new Map(bank.map((q) => [q.id, q]));
+  const seen = new Set<string>();
+  const found: BankQuestion[] = [];
+  for (const id of mock.questionIds) {
+    if (seen.has(id)) return { error: `Fixed mock ${mock.id} lists ${id} more than once.` };
+    seen.add(id);
+    const q = byId.get(id);
+    if (!q) return { error: `Fixed mock ${mock.id} references unknown question ${id}.` };
+    found.push(q);
+  }
+  if (found.length !== MOCK_QUESTIONS) {
+    return { error: `Fixed mock ${mock.id} has ${found.length} questions; expected ${MOCK_QUESTIONS}.` };
+  }
+  const per: Record<Domain, number> = { build: 0, test: 0, deploy: 0, monitor: 0 };
+  for (const q of found) per[q.domain] += 1;
+  for (const d of DOMAINS) {
+    if (per[d] !== MOCK_PER_DOMAIN) {
+      return { error: `Fixed mock ${mock.id} has ${per[d]} ${d} questions; expected ${MOCK_PER_DOMAIN}.` };
+    }
+  }
+  const rank: Record<Domain, number> = { build: 0, test: 1, deploy: 2, monitor: 3 };
+  const order = [...found].sort((a, b) => {
+    const r = rank[a.domain] - rank[b.domain];
+    if (r !== 0) return r;
+    return mock.questionIds.indexOf(a.id) - mock.questionIds.indexOf(b.id);
+  });
+  return { order };
 }
 
 // ---------- timer (absolute deadline, survives refresh/close) ----------
@@ -386,7 +446,7 @@ export function validateImport(
     warnings.push(`Dropped ${before.bookmarks - data.bookmarks.length} bookmark(s) for unknown questions.`);
   if (data.attempts.length !== before.attempts)
     warnings.push(`Dropped ${before.attempts - data.attempts.length} attempt(s) for unknown questions.`);
-  if (data.bankVersion !== '1.0.0') warnings.push(`Bank version is ${data.bankVersion}; current bank is 1.0.0. Unknown questions were dropped.`);
+  if (data.bankVersion !== '1.1.0') warnings.push(`Bank version is ${data.bankVersion}; current bank is 1.1.0. Unknown questions were dropped.`);
   return { ok: true, data, warnings };
 }
 
